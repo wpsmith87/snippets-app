@@ -17,10 +17,13 @@ def put(name, snippet):
     """Store a snippet with an associated name."""
     logging.info("Storing snippet {!r}: {!r}".format(name, snippet))
     cursor = connection.cursor()
-    command = "insert into snippets values (%s, %s)"
-    cursor.execute(command, (name, snippet))
-    connection.commit()
-    logging.debug("Snippet stored successfully.")
+    try:
+        command = "insert into snippets values (%s, %s)"
+        cursor.execute(command, (name, snippet))
+    except psycopg2.IntegrityError as e:
+        connection.rollback()
+        command = "update snippets set message=%s where keyword=%s"
+        cursor.execute(command, (snippet, name))
     
     return name, snippet
     
@@ -32,14 +35,24 @@ def get(name):
     logging.info("Retrieving snippet {!r}".format(name))
     with connection, connection.cursor() as cursor:
         cursor.execute("select message from snippets where keyword=%s", (name,))
-        snippet = cursor.fetchone()  # Have to assign return value to variable
+        row = cursor.fetchone()  # Have to assign return value to variable
     logging.debug("Snippet retrieved successfully.")
-    if not snippet: # No snippet was found with that keyword name
+    if not row: # No snippet was found with that keyword name
         return "404: Snippet not found"
     else:
-        return snippet[0]   # Return only the snippet
+        return row[0]  
+        
+def catalog():
+    """ Return a list of available keywords."""
     
-    
+    logging.info("Retrieving keywords")
+    with connection, connection.cursor() as cursor:
+        cursor.execute("select * from snippets order by keyword")
+        rows = cursor.fetchall()
+    logging.debug("Keywords retrieved successfully")
+    names = [x[0] for x in rows]
+    return names
+        
 def main():
     """Main function"""
     logging.info("Constructing parser")
@@ -53,6 +66,15 @@ def main():
     put_parser.add_argument("name", help="Name of the snippet")
     put_parser.add_argument("snippet", help="Snippet text")
     
+    # Subparser for get command
+    logging.debug("Constructing get subparser")
+    get_parser = subparsers.add_parser("get", help = "Return a snippet")
+    get_parser.add_argument("name", help = "Name of the snippet")
+    
+    # Subparser for catalog command
+    logging.debug("Constructing catalog subparser")
+    catalog_parser = subparsers.add_parser("catalog", help = "Return all keywords")
+    
     arguments = parser.parse_args()
     
     # Convert parsed arguments from Namespace to dictionary
@@ -65,6 +87,9 @@ def main():
     elif command == "get":
         snippet = get(**arguments)
         print("Retrieved snippet: {!r}".format(snippet))
+    elif command == "catalog":
+        keywords = catalog()
+        print ("Available keywords: {!r}".format(keywords))
 
 if __name__ == "__main__":
     main()
